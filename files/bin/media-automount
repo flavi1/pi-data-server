@@ -1,0 +1,152 @@
+#!/usr/bin/env bash
+# =============================================================================
+#  media-automount — montage STRICTEMENT en lecture seule des disques amovibles
+#
+#  Appelé par media-automount@<noyau>.service (lui-même déclenché par udev) :
+#     media-automount add    sda1
+#     media-automount remove sda1
+#
+#  Garanties :
+#   - le périphérique bloc est d'abord passé en lecture seule (blockdev --setro) ;
+#   - aucun rejeu de journal : ext3/4 « noload », xfs/f2fs « norecovery »,
+#     btrfs « rescue=nologreplay » ;
+#   - noatime : aucune écriture de date d'accès ;
+#   - au débranchement : démontage « paresseux » (umount -l), rien à écrire,
+#     donc aucun risque de corruption.
+#  Exclus : la carte SD système, tout ce qui figure dans /etc/fstab
+#  (ex. la future clé /incoming), ce qui est déjà monté, LUKS/RAID/swap.
+# =============================================================================
+set -uo pipefail
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export LC_ALL=C.UTF-8
+
+ACTION="${1:-}"; KNAME="${2:-}"
+DEV="/dev/$KNAME"
+BASE=/media
+STATE=/run/media-automount
+HOOKS=/etc/media-automount/hooks.d
+mkdir -p "$STATE"
+
+log()  { echo "media-automount[$KNAME]: $*"; }
+skip() { log "ignoré : $*"; exit 0; }
+
+run_hooks() {   # $1=add|remove $2=point de montage
+    [[ -d "$HOOKS" ]] || return 0
+    local h
+    for h in "$HOOKS"/*; do
+        [[ -x "$h" ]] || continue
+        timeout 20 "$h" "$1" "$2" "$DEV" || log "hook $h : code $?"
+    done
+}
+
+sanitize() {    # nom de dossier sûr, lisible
+    local s
+    # garde les lettres accentuées, remplace seulement les caractères gênants
+    s="$(printf '%s' "$1" | tr -d '\000-\037\177' | sed -E 's#[/\\:*?"<>|$`]#_#g; s/^[ ._-]+//; s/[ ._]+$//')"
+    printf '%s' "${s:0:48}"
+}
+
+do_add() {
+    [[ -b "$DEV" ]] || skip "$DEV n'existe pas"
+    [[ -f "$STATE/$KNAME" ]] && skip "déjà géré"
+    findmnt -rn -S "$DEV" >/dev/null && skip "déjà monté ailleurs"
+
+    # Propriétés du système de fichiers (sonde bas niveau, sans cache)
+    # (valeurs lues une par une : jamais d'eval sur une étiquette fournie par le disque)
+    probe() { blkid -p -o value -s "$1" "$DEV" 2>/dev/null | head -n1; }
+    local TYPE LABEL UUID PARTUUID USAGE
+    TYPE="$(probe TYPE)"; LABEL="$(probe LABEL)"; UUID="$(probe UUID)"
+    PARTUUID="$(probe PART_ENTRY_UUID)"; USAGE="$(probe USAGE)"
+    [[ "$USAGE" == "filesystem" ]] || skip "pas un système de fichiers ($USAGE)"
+
+    # Jamais le disque qui porte le système (carte SD ou disque de boot USB)
+    local root_src root_disk my_disk
+    root_src="$(findmnt -rn -o SOURCE /)"
+    root_disk="$(lsblk -ndo PKNAME "$root_src" 2>/dev/null || true)"
+    my_disk="$(lsblk -ndo PKNAME "$DEV" 2>/dev/null || true)"
+    [[ -n "$root_disk" && ( "$my_disk" == "$root_disk" || "$KNAME" == "$root_disk" ) ]] && skip "disque système"
+
+    # Tout ce qui est déclaré dans /etc/fstab est laissé à fstab (ex. /incoming)
+    local f
+    while read -r f; do
+        [[ -n "$f" ]] || continue
+        [[ "$(readlink -f "$f" 2>/dev/null)" == "$(readlink -f "$DEV")" ]] && skip "déclaré dans /etc/fstab"
+    done < <(findmnt --fstab --evaluate -rn -o SOURCE 2>/dev/null)
+    for f in "UUID=$UUID" "PARTUUID=$PARTUUID" "LABEL=$LABEL"; do
+        [[ "$f" == *= ]] && continue
+        awk -v s="$f" '$1==s {found=1} END {exit !found}' /etc/fstab 2>/dev/null && skip "déclaré dans /etc/fstab"
+    done
+
+    # Nom du point de montage : étiquette, sinon type+UUID, sinon nom noyau
+    local name dir
+    name="$(sanitize "$LABEL")"
+    [[ -n "$name" ]] || name="$(sanitize "${TYPE}-${UUID:0:8}")"
+    [[ -n "$name" && "$name" != "-" ]] || name="$KNAME"
+    dir="$BASE/$name"
+    if mountpoint -q "$dir" || { [[ -e "$dir" ]] && [[ -n "$(ls -A "$dir" 2>/dev/null)" ]]; }; then
+        dir="$BASE/${name}_${KNAME}"
+    fi
+
+    # 1) Verrou matériel logiciel : le noyau refuse le montage en écriture
+    blockdev --setro "$DEV" || log "blockdev --setro a échoué (on continue, montage ro)"
+
+    # 2) Options par système de fichiers
+    local common="ro,noatime,nodev,nosuid,noexec"
+    local -a tries=()
+    case "$TYPE" in
+        ext4|ext3)  tries=("$TYPE|$common,noload") ;;
+        ext2)       tries=("ext2|$common") ;;
+        xfs)        tries=("xfs|$common,norecovery") ;;
+        btrfs)      tries=("btrfs|$common,rescue=nologreplay" "btrfs|$common,nologreplay") ;;
+        f2fs)       tries=("f2fs|$common,norecovery" "f2fs|$common,disable_roll_forward") ;;
+        vfat)       tries=("vfat|$common,umask=0022,utf8,shortname=mixed") ;;
+        exfat)      tries=("exfat|$common,umask=0022,iocharset=utf8") ;;
+        ntfs|ntfs3) tries=("ntfs3|$common,umask=0022,iocharset=utf8" "ntfs-3g|$common,umask=0022") ;;
+        hfsplus)    tries=("hfsplus|$common") ;;
+        iso9660|udf|squashfs) tries=("$TYPE|$common") ;;
+        crypto_LUKS|swap|linux_raid_member|LVM2_member|zfs_member) skip "type $TYPE non géré" ;;
+        "")         skip "type inconnu" ;;
+        *)          tries=("$TYPE|$common") ;;
+    esac
+
+    mkdir -p "$dir"
+    local t fs opts
+    for t in "${tries[@]}"; do
+        fs="${t%%|*}"; opts="${t#*|}"
+        if mount -t "$fs" -o "$opts" "$DEV" "$dir" 2>/tmp/media-automount.$$; then
+            rm -f /tmp/media-automount.$$
+            # Vérification : le montage DOIT être en lecture seule
+            if ! findmnt -rn -o OPTIONS --target "$dir" | grep -qE '(^|,)ro(,|$)'; then
+                log "ERREUR : montage non lecture-seule, démontage immédiat"
+                umount -l "$dir"; rmdir "$dir" 2>/dev/null; exit 1
+            fi
+            echo "$dir" > "$STATE/$KNAME"
+            log "monté $DEV ($fs) sur $dir [$opts]"
+            run_hooks add "$dir"
+            return 0
+        fi
+        log "échec mount -t $fs -o $opts : $(cat /tmp/media-automount.$$ 2>/dev/null)"
+    done
+    rm -f /tmp/media-automount.$$
+    rmdir "$dir" 2>/dev/null
+    log "impossible de monter $DEV ($TYPE)"
+    exit 0   # pas d'unité en échec pour un disque illisible
+}
+
+do_remove() {
+    [[ -f "$STATE/$KNAME" ]] || exit 0
+    local dir; dir="$(cat "$STATE/$KNAME")"
+    if mountpoint -q "$dir"; then
+        # -l : détache immédiatement même si un client (FTP, HTTP, Mopidy) lit encore
+        umount -l "$dir" && log "démonté $dir"
+    fi
+    rmdir "$dir" 2>/dev/null || true
+    rm -f "$STATE/$KNAME"
+    run_hooks remove "$dir"
+}
+
+case "$ACTION" in
+    add)    do_add ;;
+    remove) do_remove ;;
+    *) echo "usage: $0 add|remove <nom-noyau>"; exit 2 ;;
+esac

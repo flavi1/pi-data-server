@@ -1,0 +1,17 @@
+[Unit]
+Description=Montage lecture seule de /dev/%I dans /media
+# Le service vit et meurt avec le périphérique : débranchement => ExecStop
+BindsTo=dev-%i.device
+After=dev-%i.device media.mount
+Requires=media.mount
+# Pas d'ordre avec local-fs.target : les disques peuvent arriver n'importe quand
+DefaultDependencies=no
+Conflicts=shutdown.target
+Before=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/media-automount add %I
+ExecStop=/usr/local/sbin/media-automount remove %I
+TimeoutSec=90

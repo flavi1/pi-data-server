@@ -1,0 +1,16 @@
+# /media en tmpfs : les dossiers de montage sont créés en RAM, jamais sur la
+# carte SD, et disparaissent proprement au redémarrage.
+[Unit]
+Description=Racine des disques amovibles (tmpfs)
+DefaultDependencies=no
+Conflicts=umount.target
+Before=local-fs.target umount.target
+
+[Mount]
+What=tmpfs
+Where=/media
+Type=tmpfs
+Options=mode=0755,size=1M,nosuid,nodev
+
+[Install]
+WantedBy=local-fs.target

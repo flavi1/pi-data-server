@@ -1,0 +1,45 @@
+# /etc/vsftpd.conf — généré par pi-data-server (install.sh)
+# Ne pas éditer ici : modifier /etc/pi-data-server/data-server.conf puis relancer l'installeur.
+
+# --- Écoute (IPv4 + IPv6) ----------------------------------------------------
+listen=NO
+listen_ipv6=YES
+
+# --- Comptes : uniquement @FTP_USER@, jamais d'anonyme -----------------------
+anonymous_enable=NO
+local_enable=YES
+userlist_enable=YES
+userlist_deny=NO
+userlist_file=/etc/vsftpd.userlist
+pam_service_name=vsftpd
+hide_ids=YES
+max_per_ip=8
+max_clients=20
+
+# --- Arborescence : prison (chroot) dans @FTP_ROOT@ --------------------------
+#   /incoming  -> @INCOMING_DIR@  (lecture/écriture)
+#   /media     -> /media          (lecture seule : bind ro + disques montés ro)
+chroot_local_user=YES
+allow_writeable_chroot=NO
+local_root=@FTP_ROOT@
+write_enable=YES
+local_umask=002
+file_open_mode=0664
+secure_chroot_dir=/var/run/vsftpd/empty
+
+# --- Mode passif (à rediriger sur la box avec le port 21) --------------------
+pasv_enable=YES
+pasv_min_port=@FTP_PASV_MIN@
+pasv_max_port=@FTP_PASV_MAX@
+@PASV_ADDRESS_LINES@
+
+# --- Journal -------------------------------------------------------------------
+xferlog_enable=YES
+xferlog_std_format=NO
+vsftpd_log_file=/var/log/vsftpd.log
+use_localtime=YES
+dirmessage_enable=NO
+ftpd_banner=pi-data-server FTP
+
+# --- Chiffrement (FTPS explicite, « FTP sur TLS » dans FileZilla) ----------------
+@TLS_LINES@

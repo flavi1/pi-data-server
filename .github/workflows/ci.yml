@@ -1,0 +1,33 @@
+# Intégration continue : à chaque push et pull request.
+# Le test d'automontage monte de vrais systèmes de fichiers sur /dev/loopN et
+# vérifie, empreinte SHA-256 à l'appui, que rien n'est jamais écrit.
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          for f in install.sh files/bin/media-automount tests/*.sh; do bash -n "$f"; done
+          shellcheck -S warning install.sh files/bin/media-automount tests/*.sh
+
+  automount:
+    name: Automontage lecture seule
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Outils (ext4, FAT, exFAT, NTFS, XFS, Btrfs)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y e2fsprogs dosfstools exfatprogs ntfs-3g xfsprogs btrfs-progs
+      - run: sudo bash tests/test-automount.sh

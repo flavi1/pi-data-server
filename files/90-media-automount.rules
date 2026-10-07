@@ -1,0 +1,17 @@
+# /etc/udev/rules.d/90-media-automount.rules
+# Tout système de fichiers apparaissant sur un périphérique bloc (clé, SSD USB,
+# lecteur de cartes…) déclenche media-automount@<noyau>.service.
+# udev ne monte rien lui-même (il tourne dans un espace de montage privé) :
+# c'est systemd qui lance le service, et qui l'arrête (=> démontage) dès que
+# le périphérique disparaît (BindsTo=dev-%i.device).
+
+ACTION!="add|change", GOTO="media_automount_end"
+SUBSYSTEM!="block", GOTO="media_automount_end"
+# Carte SD système, périphériques virtuels
+KERNEL=="mmcblk0*|loop*|ram*|zram*|dm-*|md*", GOTO="media_automount_end"
+ENV{ID_FS_USAGE}!="filesystem", GOTO="media_automount_end"
+ENV{UDISKS_IGNORE}=="1", GOTO="media_automount_end"
+
+TAG+="systemd", ENV{SYSTEMD_WANTS}+="media-automount@%k.service"
+
+LABEL="media_automount_end"
