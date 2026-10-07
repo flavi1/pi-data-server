@@ -27,7 +27,9 @@ for a in "$@"; do
 done
 [[ -t 0 ]] || NONINT=1
 export DEBIAN_FRONTEND=noninteractive
-APT=(apt-get -o DPkg::Lock::Timeout=900 -y)
+# --no-install-recommends : seulement les dépendances strictes (carte SD de petite
+# taille ; les « recommandés » tirent des centaines de Mo inutiles ici).
+APT=(apt-get -o DPkg::Lock::Timeout=900 -o APT::Install-Recommends=false -y)
 # apt_run ARGS… : apt-get qui patiente si apt est déjà occupé (mises à jour
 # automatiques, autre installation). DPkg::Lock::Timeout ne couvre que le verrou
 # de dpkg, pas ceux du cache et des listes : on réessaie tant qu'un autre apt tourne.
@@ -99,8 +101,15 @@ udevadm trigger --subsystem-match=block --action=add
 
 # ---------------------------------------------------------------------------
 log "Dossier /incoming"
-id -u "$FTP_USER" >/dev/null 2>&1 || \
+if [[ "${FTP_USER:-auto}" == auto ]]; then
+    # Compte administrateur créé par prepare.sh (premier compte « humain »)
+    FTP_USER="$(getent passwd 1000 | cut -d: -f1)"
+    FTP_USER="${FTP_USER:-ftpuser}"
+fi
+if ! id -u "$FTP_USER" >/dev/null 2>&1; then
     useradd --system --create-home --home-dir "/var/lib/$FTP_USER" --shell /usr/sbin/nologin "$FTP_USER"
+fi
+# /incoming appartient au compte FTP ; groupe commun pour partager avec d'autres comptes
 mkdir -p "$INCOMING_DIR"
 chown "$FTP_USER:$FTP_USER" "$INCOMING_DIR"
 chmod 2775 "$INCOMING_DIR"
@@ -294,6 +303,7 @@ else
     warn "Pas de pare-feu pi-server : aucun filtrage ajouté (ports $HTTP_PORT, 21, $FTP_PASV_MIN-$FTP_PASV_MAX)."
 fi
 
+apt-get clean
 IP="$(hostname -I | awk '{print $1}')"
 log "Serveur de données prêt"
 cat <<EOF
@@ -305,5 +315,7 @@ EOF
 if [[ "$FTP_PW_SET" == no ]]; then
     echo
     warn "Mot de passe FTP non défini : le compte « $FTP_USER » est verrouillé."
-    warn "Pour l'activer :  sudo passwd $FTP_USER"
+    warn "Pour l'activer, choisissez-lui un mot de passe :  sudo passwd $FTP_USER"
+    warn "(ou utilisez votre propre compte : FTP_USER=auto dans $CONF_DIR/data-server.conf,"
+    warn " puis sudo bash $HERE/install.sh)"
 fi

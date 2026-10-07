@@ -36,13 +36,30 @@ sudo git clone https://github.com/flavi1/pi-data-server /opt/pi-data-server
 sudo bash /opt/pi-data-server/install.sh
 ```
 
-En mode interactif, le script demande le mot de passe FTP au premier passage. En
-installation automatique (premier démarrage), le compte FTP reste **verrouillé** tant
-qu'aucun mot de passe n'est défini :
+### Compte FTP
+
+Par défaut (`FTP_USER=auto`), le FTP utilise **votre compte administrateur**, celui
+créé par `prepare.sh` : même identifiant, même mot de passe qu'en SSH. Rien à faire.
+
+Pour un compte FTP séparé, sans accès SSH ni shell, avec son propre mot de passe :
+
+```bash
+sudo nano /etc/pi-data-server/data-server.conf     # FTP_USER=ftpuser
+sudo bash /opt/pi-data-server/install.sh           # crée le compte et demande son mot de passe
+```
+
+Si le compte est créé pendant l'installation automatique, il reste **verrouillé**
+(aucune connexion possible) tant qu'il n'a pas de mot de passe. Pour l'activer :
 
 ```bash
 sudo passwd ftpuser
 ```
+
+> Exposer votre compte administrateur sur un FTP ouvert à Internet signifie que son
+> mot de passe circule (chiffré, en FTPS) et peut être attaqué par force brute
+> (fail2ban limite à 5 essais / 10 min). SSH reste fermé depuis l'extérieur par le
+> pare-feu. Avec un mot de passe solide c'est raisonnable ; sinon préférez un compte
+> dédié.
 
 Le script est relançable après toute modification de
 `/etc/pi-data-server/data-server.conf` (ports, utilisateur, adresse passive, TLS…),
@@ -130,7 +147,8 @@ HTTPS intégré : si besoin, mettez un reverse-proxy (Caddy) devant.
 | `/incoming` | `/incoming` | lecture/écriture |
 | `/media` | `/media` (bind récursif) | lecture seule |
 
-- Un seul compte autorisé (`ftpuser`), sans shell : il ne peut pas ouvrir de session SSH.
+- Un seul compte autorisé (`FTP_USER`, voir « Compte FTP » plus haut) ; tous les
+  autres comptes, root compris, sont refusés.
 - Enfermé (chroot) dans `/srv/ftp` ; anonyme interdit.
 - **FTPS explicite obligatoire** (certificat auto-signé généré dans `/etc/ssl/pi-data-server/`).
   Dans FileZilla : *Chiffrement : « Connexion FTP explicite sur TLS »*, accepter le
@@ -159,7 +177,7 @@ sudo nano /etc/fstab
 # UUID=xxxx-xxxx  /incoming  ext4  defaults,noatime,nofail,x-systemd.device-timeout=10s  0  2
 sudo systemctl daemon-reload
 sudo mount /incoming
-sudo chown ftpuser:ftpuser /incoming && sudo chmod 2775 /incoming
+sudo chown <compte FTP>: /incoming && sudo chmod 2775 /incoming
 sudo systemctl restart srv-ftp-incoming.mount vsftpd
 ```
 
