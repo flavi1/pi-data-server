@@ -1,0 +1,53 @@
+# /etc/pi-data-server/lighttpd-media.conf — généré par pi-data-server (install.sh)
+# Ne pas éditer ici : modifier /etc/pi-data-server/data-server.conf puis relancer l'installeur.
+#
+# Instance lighttpd dédiée : lecture seule de /media, listing des dossiers,
+# aucun module d'écriture (pas de WebDAV, pas de CGI, pas d'upload).
+# Lancée par media-http.service sous l'utilisateur www-data (port > 1024 :
+# aucun privilège root nécessaire). Le lighttpd « système » (port 80) n'est pas utilisé.
+
+server.modules = ( "mod_dirlisting", "mod_staticfile" )
+
+server.document-root = "/media"
+server.bind          = "0.0.0.0"
+server.port          = @HTTP_PORT@
+$SERVER["socket"] == "[::]:@HTTP_PORT@" { }
+
+server.tag              = ""
+server.max-connections  = 64
+server.max-read-idle    = 30
+server.max-write-idle   = 120
+server.follow-symlink   = "disable"
+server.range-requests   = "enable"
+
+dir-listing.activate      = "enable"
+dir-listing.encoding      = "utf-8"
+dir-listing.hide-dotfiles = "enable"
+dir-listing.sort          = "enable"
+
+static-file.exclude-extensions = ( ".php", ".pl", ".cgi", ".fcgi" )
+
+mimetype.assign = (
+    ".flac" => "audio/flac",           ".mp3"  => "audio/mpeg",
+    ".ogg"  => "audio/ogg",            ".opus" => "audio/ogg",
+    ".m4a"  => "audio/mp4",            ".aac"  => "audio/aac",
+    ".wav"  => "audio/wav",            ".aif"  => "audio/aiff",
+    ".aiff" => "audio/aiff",           ".dsf"  => "audio/x-dsf",
+    ".mp4"  => "video/mp4",            ".m4v"  => "video/mp4",
+    ".mkv"  => "video/x-matroska",     ".webm" => "video/webm",
+    ".avi"  => "video/x-msvideo",      ".mov"  => "video/quicktime",
+    ".jpg"  => "image/jpeg",           ".jpeg" => "image/jpeg",
+    ".png"  => "image/png",            ".gif"  => "image/gif",
+    ".webp" => "image/webp",           ".svg"  => "image/svg+xml",
+    ".pdf"  => "application/pdf",      ".zip"  => "application/zip",
+    ".epub" => "application/epub+zip", ".iso"  => "application/octet-stream",
+    ".txt"  => "text/plain; charset=utf-8",
+    ".nfo"  => "text/plain; charset=utf-8",
+    ".cue"  => "text/plain; charset=utf-8",
+    ".log"  => "text/plain; charset=utf-8",
+    ".m3u"  => "audio/x-mpegurl",      ".m3u8" => "application/vnd.apple.mpegurl",
+    # .html servi en texte : rien d'actif ne s'exécute depuis un disque branché
+    ".html" => "text/plain; charset=utf-8",
+    ".htm"  => "text/plain; charset=utf-8",
+    ""      => "application/octet-stream"
+)

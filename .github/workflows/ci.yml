@@ -21,6 +21,14 @@ jobs:
           for f in install.sh files/bin/media-automount tests/*.sh; do bash -n "$f"; done
           shellcheck -S warning install.sh files/bin/media-automount tests/*.sh
 
+  http:
+    name: Serveur HTTP lecture seule (lighttpd)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: sudo apt-get update && sudo apt-get install -y lighttpd curl
+      - run: bash tests/test-http.sh
+
   automount:
     name: Automontage lecture seule
     runs-on: ubuntu-latest

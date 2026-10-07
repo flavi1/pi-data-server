@@ -18,7 +18,7 @@ tout moment.
                                                             │
                      ┌──────────────────────────────────────┼─────────────────────┐
                      ▼                                      ▼                     ▼
-            darkhttpd :8080 (public, ro)      vsftpd (FTPS, chroot /srv/ftp)   tout autre lecteur
+            lighttpd  :8080 (public, ro)      vsftpd (FTPS, chroot /srv/ftp)   tout autre lecteur
                                               /incoming  -> /incoming (rw)
                                               /media     -> /media    (ro)
 ```
@@ -108,11 +108,16 @@ Les exécutables de `/etc/media-automount/hooks.d/` sont appelés après chaque 
 / démontage (`add|remove <dossier> <périphérique>`). Point d'extension facultatif :
 aucun autre module n'en dépend (pi-sound-server surveille `/media` lui-même).
 
-## 3. HTTP lecture seule (darkhttpd)
+## 3. HTTP lecture seule (lighttpd)
 
 - Service `media-http.service`, port `HTTP_PORT` (8080 par défaut) : `http://hifi.local:8080/`.
-- darkhttpd est minuscule, ne sait que lire, se **chroote dans `/media`** puis abandonne
-  les droits root ; systemd l'enferme en plus (`ProtectSystem=strict`, etc.).
+- Instance **dédiée** de lighttpd (`/etc/pi-data-server/lighttpd-media.conf`, générée) :
+  uniquement les modules de fichiers statiques et de listing des dossiers, aucun module
+  d'écriture (ni WebDAV, ni CGI, ni upload). Les `.html` des disques sont servis en
+  texte brut : rien d'actif ne s'exécute depuis une clé branchée.
+- Tourne sous `www-data`, **sans aucun privilège** (port > 1024), enfermé par systemd
+  (`ProtectSystem=strict`, `NoNewPrivileges`, aucune capacité…). Le service lighttpd
+  par défaut de Debian (port 80) est désactivé.
 - Les disques branchés après son démarrage apparaissent immédiatement.
 
 Pour le publier sur Internet : redirigez un port de la box vers `8080` de la Pi. Pas de

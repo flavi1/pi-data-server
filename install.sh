@@ -3,7 +3,7 @@
 # =============================================================================
 #  pi-data-server — serveur de données
 #   - automontage udev de tous les disques amovibles, lecture seule absolue
-#   - HTTP (darkhttpd) : /media en lecture seule, public
+#   - HTTP (lighttpd, instance dédiée) : /media en lecture seule, public
 #   - FTP (vsftpd, FTPS) : /incoming en lecture/écriture, /media en lecture seule
 #
 #  Autonome : fonctionne seul sur Raspberry Pi OS (Debian). Si pi-server est
@@ -39,7 +39,7 @@ mkdir -p "$CONF_DIR"
 
 log "Paquets"
 "${APT[@]}" update
-"${APT[@]}" install darkhttpd vsftpd ntfs-3g exfatprogs openssl python3 util-linux
+"${APT[@]}" install lighttpd vsftpd ntfs-3g exfatprogs openssl python3 util-linux
 if [[ "${FAIL2BAN:-yes}" == "yes" ]]; then "${APT[@]}" install fail2ban python3-systemd; fi
 
 # ---------------------------------------------------------------------------
@@ -106,19 +106,27 @@ systemctl daemon-reload
 systemctl enable --now "$unit_in" "$unit_me"
 
 # ---------------------------------------------------------------------------
-log "Serveur HTTP lecture seule sur le port $HTTP_PORT"
-cat > /etc/systemd/system/media-http.service <<EOF
+log "Serveur HTTP lecture seule sur le port $HTTP_PORT (lighttpd)"
+# Le service lighttpd par défaut (port 80, /var/www) n'est pas utilisé
+systemctl disable --now lighttpd.service 2>/dev/null || true
+sed "s/@HTTP_PORT@/$HTTP_PORT/g" "$F/lighttpd-media.conf.in" > "$CONF_DIR/lighttpd-media.conf"
+lighttpd -tt -f "$CONF_DIR/lighttpd-media.conf"
+cat > /etc/systemd/system/media-http.service <<UNIT
 [Unit]
-Description=Mini serveur HTTP lecture seule de /media (darkhttpd)
+Description=Mini serveur HTTP lecture seule de /media (lighttpd)
 After=network-online.target media.mount
 Wants=network-online.target
 Requires=media.mount
 
 [Service]
-# darkhttpd se chroote dans /media puis abandonne les droits root
-ExecStart=/usr/bin/darkhttpd /media --port $HTTP_PORT --ipv6 --chroot --uid nobody --gid nogroup --no-server-id --maxconn 64 --timeout 30
+ExecStart=/usr/sbin/lighttpd -D -f $CONF_DIR/lighttpd-media.conf
 Restart=always
 RestartSec=2
+# Aucun privilège : utilisateur www-data, port > 1024
+User=www-data
+Group=www-data
+NoNewPrivileges=yes
+CapabilityBoundingSet=
 # Durcissement : le service ne peut rien écrire nulle part
 ProtectSystem=strict
 ProtectHome=yes
@@ -128,13 +136,12 @@ ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
-CapabilityBoundingSet=CAP_SYS_CHROOT CAP_SETUID CAP_SETGID CAP_NET_BIND_SERVICE
 LockPersonality=yes
 MemoryDenyWriteExecute=yes
 
 [Install]
 WantedBy=multi-user.target
-EOF
+UNIT
 systemctl daemon-reload
 systemctl enable media-http.service
 systemctl restart media-http.service
@@ -223,7 +230,11 @@ ignoreip  = 127.0.0.1/8 ::1
 [vsftpd]
 enabled = true
 port    = ftp,ftp-data,ftps,ftps-data
+# vsftpd écrit ses échecs (« FAIL LOGIN ») dans son propre fichier
+backend = auto
+logpath = /var/log/vsftpd.log
 EOF
+    touch /var/log/vsftpd.log
     systemctl enable fail2ban
     systemctl restart fail2ban
 fi
