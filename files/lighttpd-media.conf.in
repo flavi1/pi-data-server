@@ -6,7 +6,7 @@
 # Lancée par media-http.service sous l'utilisateur www-data (port > 1024 :
 # aucun privilège root nécessaire). Le lighttpd « système » (port 80) n'est pas utilisé.
 
-server.modules = ( "mod_dirlisting", "mod_staticfile" )
+server.modules = ( "mod_access", "mod_dirlisting", "mod_staticfile" )
 
 server.document-root = "/media"
 server.bind          = "0.0.0.0"
@@ -24,6 +24,11 @@ dir-listing.activate      = "enable"
 dir-listing.encoding      = "utf-8"
 dir-listing.hide-dotfiles = "enable"
 dir-listing.sort          = "enable"
+
+# Lecture seule : toute méthode autre que GET / HEAD est refusée (403)
+$HTTP["request-method"] !~ "^(GET|HEAD)$" {
+    url.access-deny = ( "" )
+}
 
 static-file.exclude-extensions = ( ".php", ".pl", ".cgi", ".fcgi" )
 
