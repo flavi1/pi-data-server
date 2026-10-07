@@ -28,6 +28,23 @@ done
 [[ -t 0 ]] || NONINT=1
 export DEBIAN_FRONTEND=noninteractive
 APT=(apt-get -o DPkg::Lock::Timeout=900 -y)
+# apt_run ARGS… : apt-get qui patiente si apt est déjà occupé (mises à jour
+# automatiques, autre installation). DPkg::Lock::Timeout ne couvre que le verrou
+# de dpkg, pas ceux du cache et des listes : on réessaie tant qu'un autre apt tourne.
+apt_busy() { pgrep -x 'apt-get|apt|dpkg|unattended-upgr' >/dev/null || pgrep -f 'apt.systemd.daily' >/dev/null; }
+apt_run() {
+    local i
+    for i in $(seq 1 120); do
+        while apt_busy; do
+            [[ $i -eq 1 ]] && echo "   apt est occupé (mises à jour automatiques ?) : attente…"
+            sleep 5
+        done
+        "${APT[@]}" "$@" && return 0
+        apt_busy || return 1      # échec réel (paquet introuvable…) : on s'arrête
+        sleep 5
+    done
+    return 1
+}
 log()  { printf '\n\033[1;32m[pi-data-server]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m!!\033[0m %s\n' "$*"; }
 
@@ -38,9 +55,9 @@ mkdir -p "$CONF_DIR"
 . "$CONF_DIR/data-server.conf"
 
 log "Paquets"
-"${APT[@]}" update
-"${APT[@]}" install lighttpd vsftpd ntfs-3g exfatprogs openssl python3 util-linux
-if [[ "${FAIL2BAN:-yes}" == "yes" ]]; then "${APT[@]}" install fail2ban python3-systemd; fi
+apt_run update
+apt_run install lighttpd vsftpd ntfs-3g exfatprogs openssl python3 util-linux
+if [[ "${FAIL2BAN:-yes}" == "yes" ]]; then apt_run install fail2ban python3-systemd; fi
 
 # ---------------------------------------------------------------------------
 log "Automontage lecture seule (/media en tmpfs + udev + systemd)"
