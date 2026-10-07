@@ -218,7 +218,7 @@ if [[ "${FTP_TLS:-yes}" == "yes" ]]; then
         chmod 600 /etc/ssl/pi-data-server/vsftpd.key
     fi
 fi
-SSL_CERT=/etc/ssl/pi-data-server/vsftpd.pem SSL_KEY=/etc/ssl/pi-data-server/vsftpd.key
+export SSL_CERT=/etc/ssl/pi-data-server/vsftpd.pem SSL_KEY=/etc/ssl/pi-data-server/vsftpd.key
 # shellcheck source=files/vsftpd-render.sh
 . "$F/vsftpd-render.sh"
 render_vsftpd "$F/vsftpd.conf.in" /etc/vsftpd.conf
