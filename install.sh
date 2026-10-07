@@ -31,12 +31,36 @@ APT=(apt-get -o DPkg::Lock::Timeout=900 -y)
 # apt_run ARGS… : apt-get qui patiente si apt est déjà occupé (mises à jour
 # automatiques, autre installation). DPkg::Lock::Timeout ne couvre que le verrou
 # de dpkg, pas ceux du cache et des listes : on réessaie tant qu'un autre apt tourne.
-apt_busy() { pgrep -x 'apt-get|apt|dpkg|unattended-upgr' >/dev/null || pgrep -f 'apt.systemd.daily' >/dev/null; }
+# apt_busy : vrai si un autre programme tient un verrou d'apt/dpkg. On teste les
+# verrous eux-mêmes (fcntl, comme apt), pas les noms de processus : le démon de
+# veille d'unattended-upgrades tourne en permanence et ne doit pas compter.
+apt_busy() {
+    python3 - <<'PY'
+import fcntl, os, sys
+for f in ("/var/lib/dpkg/lock-frontend", "/var/lib/dpkg/lock",
+          "/var/cache/apt/archives/lock", "/var/lib/apt/lists/lock"):
+    try:
+        fd = os.open(f, os.O_RDWR)
+    except OSError:
+        continue
+    try:
+        fcntl.lockf(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.lockf(fd, fcntl.LOCK_UN)
+    except OSError:
+        sys.exit(0)          # verrou tenu par un autre programme
+    finally:
+        os.close(fd)
+sys.exit(1)
+PY
+}
 apt_run() {
-    local i
-    for i in $(seq 1 120); do
+    local _ waited=0
+    for _ in $(seq 1 120); do
         while apt_busy; do
-            [[ $i -eq 1 ]] && echo "   apt est occupé (mises à jour automatiques ?) : attente…"
+            if [[ $waited -eq 0 ]]; then
+                echo "   apt est occupé par un autre programme : attente (voir : sudo journalctl -fu apt-daily -u apt-daily-upgrade)"
+                waited=1
+            fi
             sleep 5
         done
         "${APT[@]}" "$@" && return 0
