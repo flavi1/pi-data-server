@@ -16,7 +16,7 @@ jobs:
     name: ShellCheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: |
           for f in install.sh files/bin/media-automount tests/*.sh; do bash -n "$f"; done
           shellcheck -S warning install.sh files/bin/media-automount tests/*.sh
@@ -25,7 +25,7 @@ jobs:
     name: Automontage lecture seule
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Outils (ext4, FAT, exFAT, NTFS, XFS, Btrfs)
         run: |
           sudo apt-get update

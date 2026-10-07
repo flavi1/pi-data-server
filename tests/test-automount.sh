@@ -32,27 +32,43 @@ tool_for() { case "$1" in ext4|ext2) echo mkfs.ext4 ;; vfat) echo mkfs.vfat ;; e
              ntfs) echo mkntfs ;; xfs) echo mkfs.xfs ;; btrfs) echo mkfs.btrfs ;; esac; }
 
 ok()   { echo "  ok   : $*"; }
-fail() { echo "  FAIL : $*"; FAILS=$((FAILS+1)); }
+fail() {
+    echo "  FAIL : $*"; FAILS=$((FAILS+1))
+    [[ -n "${GITHUB_ACTIONS:-}" ]] && echo "::error title=test-automount ($CUR)::$*"
+    return 0
+}
+skip() {
+    echo "  ignoré : $*"
+    [[ -n "${GITHUB_ACTIONS:-}" ]] && echo "::warning title=test-automount ($CUR)::ignoré : $*"
+    return 0
+}
+CUR=""
 
 TYPES=("$@"); [[ ${#TYPES[@]} -gt 0 ]] || TYPES=(ext4 ext2 vfat exfat ntfs xfs btrfs)
 for t in "${TYPES[@]}"; do
-    command -v "$(tool_for "$t")" >/dev/null 2>&1 || { echo "== $t : outil absent, ignoré"; continue; }
+    CUR="$t"
+    command -v "$(tool_for "$t")" >/dev/null 2>&1 || { skip "$t : outil de formatage absent"; continue; }
     echo "== $t"
-    RUN=$((RUN+1))
     img="$WORK/img"; rm -f "$img"; truncate -s 300M "$img"
     label="TEST$t"; [[ "$t" == ext4 ]] && label="Ma Clé"
-    mkfs_for "$t" "$img" "$label"
-    # quelques fichiers
+    mkfs_for "$t" "$img" "$label" || { skip "$t : formatage impossible"; continue; }
+    # quelques fichiers (montage en écriture, hors media-automount)
     L="$(losetup -f --show "$img")"
-    mkdir -p "$WORK/m"; mount "$L" "$WORK/m"; echo bonjour > "$WORK/m/fichier.txt"; mkdir -p "$WORK/m/Album"; umount "$WORK/m"
+    mkdir -p "$WORK/m"
+    if ! mount "$L" "$WORK/m" 2>"$WORK/err"; then
+        skip "$t : non montable sur cette machine ($(tr '\n' ' ' < "$WORK/err"))"
+        losetup -d "$L"; continue
+    fi
+    echo bonjour > "$WORK/m/fichier.txt"; mkdir -p "$WORK/m/Album"; umount "$WORK/m"
     losetup -d "$L"
+    RUN=$((RUN+1))
     before="$(sha256sum "$img" | cut -d' ' -f1)"
 
     L="$(losetup -f --show "$img")"; k="$(basename "$L")"
-    bash "$AM" add "$k"
+    bash "$AM" add "$k" 2>&1 | tee "$WORK/am.log"
     dir="$(cat "/run/media-automount/$k" 2>/dev/null || true)"
     if [[ -z "$dir" ]] || ! mountpoint -q "$dir"; then
-        fail "$t non monté"; losetup -d "$L"; continue
+        fail "$t non monté par media-automount : $(tr '\n' ' ' < "$WORK/am.log")"; losetup -d "$L"; continue
     fi
     ok "monté sur $dir"
     [[ "$t" == ext4 && "$dir" != "/media/Ma Clé" ]] && fail "nom de dossier inattendu : $dir"
