@@ -29,6 +29,14 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y lighttpd curl
       - run: bash tests/test-http.sh
 
+  ftp:
+    name: Serveur FTP (vrai vsftpd)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: sudo apt-get update && sudo apt-get install -y vsftpd curl openssl
+      - run: sudo bash tests/test-ftp.sh
+
   automount:
     name: Automontage lecture seule
     runs-on: ubuntu-latest

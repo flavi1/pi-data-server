@@ -209,12 +209,6 @@ auth    required        pam_listfile.so item=user sense=deny file=/etc/ftpusers 
 @include common-session
 EOF
 
-PASV_LINES="# pasv_address non défini : l'adresse locale de la Pi est annoncée"
-if [[ -n "${FTP_PASV_ADDRESS:-}" ]]; then
-    PASV_LINES="pasv_address=$FTP_PASV_ADDRESS"
-    [[ "$FTP_PASV_ADDRESS" =~ ^[0-9.]+$ ]] || PASV_LINES+=$'\npasv_addr_resolve=YES'
-fi
-
 if [[ "${FTP_TLS:-yes}" == "yes" ]]; then
     mkdir -p /etc/ssl/pi-data-server
     if [[ ! -f /etc/ssl/pi-data-server/vsftpd.pem ]]; then
@@ -223,35 +217,21 @@ if [[ "${FTP_TLS:-yes}" == "yes" ]]; then
             -keyout /etc/ssl/pi-data-server/vsftpd.key -out /etc/ssl/pi-data-server/vsftpd.pem
         chmod 600 /etc/ssl/pi-data-server/vsftpd.key
     fi
-    TLS_LINES="ssl_enable=YES
-rsa_cert_file=/etc/ssl/pi-data-server/vsftpd.pem
-rsa_private_key_file=/etc/ssl/pi-data-server/vsftpd.key
-force_local_logins_ssl=YES
-force_local_data_ssl=YES
-ssl_sslv2=NO
-ssl_sslv3=NO
-ssl_tlsv1=NO
-ssl_tlsv1_1=NO
-ssl_tlsv1_2=YES
-require_ssl_reuse=NO
-ssl_ciphers=HIGH"
-else
-    TLS_LINES="ssl_enable=NO   # ATTENTION : mot de passe en clair sur le réseau"
 fi
-
-PASV_LINES="$PASV_LINES" TLS_LINES="$TLS_LINES" FTP_USER="$FTP_USER" FTP_ROOT="$FTP_ROOT" \
-INCOMING_DIR="$INCOMING_DIR" FTP_PASV_MIN="$FTP_PASV_MIN" FTP_PASV_MAX="$FTP_PASV_MAX" \
-python3 - "$F/vsftpd.conf.in" /etc/vsftpd.conf <<'PY'
-import os, sys
-t = open(sys.argv[1], encoding="utf-8").read()
-for k in ("FTP_USER", "FTP_ROOT", "INCOMING_DIR", "FTP_PASV_MIN", "FTP_PASV_MAX"):
-    t = t.replace("@%s@" % k, os.environ[k])
-t = t.replace("@PASV_ADDRESS_LINES@", os.environ["PASV_LINES"])
-t = t.replace("@TLS_LINES@", os.environ["TLS_LINES"])
-open(sys.argv[2], "w", encoding="utf-8").write(t)
-PY
+SSL_CERT=/etc/ssl/pi-data-server/vsftpd.pem SSL_KEY=/etc/ssl/pi-data-server/vsftpd.key
+# shellcheck source=files/vsftpd-render.sh
+. "$F/vsftpd-render.sh"
+render_vsftpd "$F/vsftpd.conf.in" /etc/vsftpd.conf
+# vsftpd ne dit rien dans le journal s'il refuse sa configuration : on vérifie
+# qu'il démarre réellement, et on affiche son message sinon.
 systemctl enable vsftpd
 systemctl restart vsftpd
+sleep 1
+if ! systemctl is-active --quiet vsftpd; then
+    warn "vsftpd refuse de démarrer :"
+    timeout 3 /usr/sbin/vsftpd /etc/vsftpd.conf 2>&1 | head -n 3 || true
+    exit 1
+fi
 
 FTP_PW_SET=yes
 if ! passwd -S "$FTP_USER" 2>/dev/null | awk '{exit ($2=="P")?0:1}'; then
